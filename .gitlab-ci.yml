@@ -1,0 +1,307 @@
+# TruthGuard GitLab CI/CD Pipeline
+# Comprehensive automation for scraping, analysis, training, and deployment
+
+stages:
+  - setup
+  - scrape
+  - analyze
+  - train
+  - build
+  - deploy
+  - monitor
+  - contribute
+
+variables:
+  DOCKER_IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA
+  GOOGLE_CLOUD_PROJECT: "truthguard-ai"
+  MONGODB_URI: $MONGODB_URI
+  GOOGLE_AI_API_KEY: $GOOGLE_AI_API_KEY
+  NODE_VERSION: "18"
+  PYTHON_VERSION: "3.11"
+
+# Setup and validation
+setup_environment:
+  stage: setup
+  image: node:18-alpine
+  script:
+    - echo "Setting up TruthGuard environment..."
+    - npm --version
+    - node --version
+    - echo "Environment ready for processing"
+  artifacts:
+    reports:
+      dotenv: setup.env
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+
+# Enhanced data scraping with multiple sources
+scrape_news_comprehensive:
+  stage: scrape
+  image: python:3.11
+  dependencies:
+    - setup_environment
+  before_script:
+    - pip install --upgrade pip
+    - pip install requests beautifulsoup4 pymongo google-cloud-aiplatform newspaper3k feedparser
+  script:
+    - echo "Starting comprehensive news scraping..."
+    - python scripts/scrape_news_enhanced.py
+    - python scripts/validate_scraped_data.py
+  artifacts:
+    paths:
+      - scraped_data/
+      - scraping_logs/
+    expire_in: 2 hours
+    reports:
+      junit: scraping_logs/test_results.xml
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_MERGE_REQUEST_ID
+
+# AI-powered content analysis using Google Cloud
+analyze_content_ai:
+  stage: analyze
+  image: python:3.11
+  dependencies:
+    - scrape_news_comprehensive
+  before_script:
+    - pip install google-generativeai pymongo transformers torch datasets numpy pandas
+  script:
+    - echo "Analyzing content with Google Cloud AI..."
+    - python scripts/analyze_with_gemini.py
+    - python scripts/generate_embeddings.py
+    - python scripts/update_mongodb_vectors.py
+  artifacts:
+    paths:
+      - analysis_results/
+      - embeddings/
+      - analysis_reports/
+    expire_in: 1 day
+  parallel:
+    matrix:
+      - ANALYSIS_TYPE: ["bias_detection", "sentiment_analysis", "fact_checking", "narrative_analysis"]
+
+# Model training and improvement
+train_models_advanced:
+  stage: train
+  image: python:3.11
+  dependencies:
+    - analyze_content_ai
+  before_script:
+    - pip install transformers torch datasets google-cloud-aiplatform scikit-learn matplotlib seaborn
+  script:
+    - echo "Training advanced bias detection models..."
+    - python scripts/train_bias_model_v2.py
+    - python scripts/train_sentiment_model.py
+    - python scripts/evaluate_models.py
+    - python scripts/upload_to_vertex_ai.py
+  artifacts:
+    paths:
+      - models/
+      - model_metrics/
+      - training_logs/
+    expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+  when: manual
+  allow_failure: false
+
+# Build Next.js application
+build_application:
+  stage: build
+  image: node:18-alpine
+  dependencies:
+    - setup_environment
+  before_script:
+    - npm ci --cache .npm --prefer-offline
+  script:
+    - echo "Building TruthGuard application..."
+    - npm run build
+    - npm run lint
+  artifacts:
+    paths:
+      - .next/
+      - public/
+    expire_in: 1 hour
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}
+    paths:
+      - .npm/
+      - node_modules/
+
+# Docker build and push
+build_docker_image:
+  stage: build
+  image: docker:latest
+  services:
+    - docker:dind
+  dependencies:
+    - build_application
+  before_script:
+    - echo $CI_REGISTRY_PASSWORD | docker login -u $CI_REGISTRY_USER --password-stdin $CI_REGISTRY
+  script:
+    - echo "Building Docker image..."
+    - docker build -t $DOCKER_IMAGE .
+    - docker tag $DOCKER_IMAGE $CI_REGISTRY_IMAGE:latest
+    - docker push $DOCKER_IMAGE
+    - docker push $CI_REGISTRY_IMAGE:latest
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+
+# Deploy to Google Cloud Run
+deploy_to_cloud_run:
+  stage: deploy
+  image: google/cloud-sdk:alpine
+  dependencies:
+    - build_docker_image
+  before_script:
+    - echo $GOOGLE_CLOUD_SERVICE_KEY | base64 -d > gcloud-service-key.json
+    - gcloud auth activate-service-account --key-file gcloud-service-key.json
+    - gcloud config set project $GOOGLE_CLOUD_PROJECT
+    - gcloud auth configure-docker
+  script:
+    - echo "Deploying to Google Cloud Run..."
+    - |
+      gcloud run deploy truthguard-api \
+        --image $DOCKER_IMAGE \
+        --platform managed \
+        --region us-central1 \
+        --allow-unauthenticated \
+        --memory 2Gi \
+        --cpu 2 \
+        --max-instances 10 \
+        --set-env-vars MONGODB_URI="$MONGODB_URI",GOOGLE_AI_API_KEY="$GOOGLE_AI_API_KEY",NODE_ENV=production
+    - echo "Deployment completed successfully"
+  environment:
+    name: production
+    url: https://truthguard-api-$GOOGLE_CLOUD_PROJECT.a.run.app
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+
+# Deploy to staging environment
+deploy_to_staging:
+  stage: deploy
+  image: google/cloud-sdk:alpine
+  dependencies:
+    - build_docker_image
+  before_script:
+    - echo $GOOGLE_CLOUD_SERVICE_KEY | base64 -d > gcloud-service-key.json
+    - gcloud auth activate-service-account --key-file gcloud-service-key.json
+    - gcloud config set project $GOOGLE_CLOUD_PROJECT
+  script:
+    - echo "Deploying to staging environment..."
+    - |
+      gcloud run deploy truthguard-staging \
+        --image $DOCKER_IMAGE \
+        --platform managed \
+        --region us-central1 \
+        --allow-unauthenticated \
+        --memory 1Gi \
+        --cpu 1 \
+        --set-env-vars MONGODB_URI="$MONGODB_URI",GOOGLE_AI_API_KEY="$GOOGLE_AI_API_KEY",NODE_ENV=staging
+  environment:
+    name: staging
+    url: https://truthguard-staging-$GOOGLE_CLOUD_PROJECT.a.run.app
+  rules:
+    - if: $CI_MERGE_REQUEST_ID
+
+# Performance and system monitoring
+monitor_system_performance:
+  stage: monitor
+  image: python:3.11
+  dependencies:
+    - deploy_to_cloud_run
+  script:
+    - pip install requests pymongo google-cloud-monitoring
+    - echo "Monitoring system performance..."
+    - python scripts/monitor_system_health.py
+    - python scripts/check_api_endpoints.py
+    - python scripts/validate_mongodb_connection.py
+  artifacts:
+    reports:
+      junit: monitoring_results.xml
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+  allow_failure: true
+
+# Contribute to GitLab CI/CD Catalog
+contribute_to_gitlab_catalog:
+  stage: contribute
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache git
+  script:
+    - echo "Preparing TruthGuard pipeline for GitLab CI/CD Catalog..."
+    - mkdir -p catalog-contribution/truthguard-ai-pipeline
+    - cp .gitlab-ci.yml catalog-contribution/truthguard-ai-pipeline/
+    - cp README.md catalog-contribution/truthguard-ai-pipeline/
+    - cp -r scripts/ catalog-contribution/truthguard-ai-pipeline/
+    - |
+      cat > catalog-contribution/truthguard-ai-pipeline/catalog-info.yml << EOF
+      spec:
+        inputs:
+          mongodb_uri:
+            description: MongoDB Atlas connection string
+            type: string
+          google_ai_api_key:
+            description: Google AI API key for Gemini
+            type: string
+          news_sources:
+            description: List of news sources to scrape
+            type: array
+            default: ["reuters.com", "apnews.com", "bbc.com"]
+      EOF
+    - echo "TruthGuard AI Pipeline ready for GitLab CI/CD Catalog submission"
+  artifacts:
+    paths:
+      - catalog-contribution/
+    expire_in: 1 month
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - when: manual
+
+# Automated testing
+test_api_endpoints:
+  stage: monitor
+  image: node:18-alpine
+  script:
+    - npm install -g newman
+    - echo "Testing API endpoints..."
+    - newman run tests/api-tests.json --environment tests/environment.json
+  artifacts:
+    reports:
+      junit: newman-results.xml
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_MERGE_REQUEST_ID
+
+# Security scanning
+security_scan:
+  stage: monitor
+  image: owasp/zap2docker-stable
+  script:
+    - echo "Running security scan..."
+    - zap-baseline.py -t https://truthguard-api-$GOOGLE_CLOUD_PROJECT.a.run.app
+  artifacts:
+    reports:
+      junit: zap-results.xml
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+  allow_failure: true
+
+# Cleanup old deployments
+cleanup_old_deployments:
+  stage: monitor
+  image: google/cloud-sdk:alpine
+  script:
+    - echo $GOOGLE_CLOUD_SERVICE_KEY | base64 -d > gcloud-service-key.json
+    - gcloud auth activate-service-account --key-file gcloud-service-key.json
+    - gcloud config set project $GOOGLE_CLOUD_PROJECT
+    - echo "Cleaning up old Cloud Run revisions..."
+    - gcloud run revisions list --service=truthguard-api --region=us-central1 --format="value(name)" | tail -n +6 | xargs -I {} gcloud run revisions delete {} --region=us-central1 --quiet
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+  when: manual
