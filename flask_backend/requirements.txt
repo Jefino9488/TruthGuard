@@ -1,0 +1,14 @@
+Flask
+Flask-PyMongo
+Flask-CORS
+APScheduler
+newsapi-python
+sentence-transformers
+beautifulsoup4
+requests
+newspaper3k
+python-dotenv
+google-generativeai
+pydantic
+pytest
+pytest-mock
