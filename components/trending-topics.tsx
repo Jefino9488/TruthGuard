@@ -6,8 +6,14 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { TrendingUp, ArrowRight, AlertTriangle } from "lucide-react"
 
+import { useEffect, useState } from "react"
+import { Card, CardContent } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { TrendingUp, ArrowRight, AlertTriangle } from "lucide-react"
+
 interface Topic {
-  id: number
+  id: string // Changed to string to allow for generated IDs
   name: string
   biasScore: number
   misinfoRisk: number
@@ -17,71 +23,75 @@ interface Topic {
   category: string
 }
 
-const topics: Topic[] = [
-  {
-    id: 1,
-    name: "Economic Policy",
-    biasScore: 0.68,
-    misinfoRisk: 0.45,
-    trendDirection: "up",
-    trendPercentage: 24,
-    sources: 87,
-    category: "Economy",
-  },
-  {
-    id: 2,
-    name: "Climate Change",
-    biasScore: 0.72,
-    misinfoRisk: 0.62,
-    trendDirection: "up",
-    trendPercentage: 18,
-    sources: 65,
-    category: "Environment",
-  },
-  {
-    id: 3,
-    name: "Healthcare Reform",
-    biasScore: 0.58,
-    misinfoRisk: 0.32,
-    trendDirection: "stable",
-    trendPercentage: 3,
-    sources: 42,
-    category: "Healthcare",
-  },
-  {
-    id: 4,
-    name: "Immigration Policy",
-    biasScore: 0.85,
-    misinfoRisk: 0.76,
-    trendDirection: "up",
-    trendPercentage: 31,
-    sources: 93,
-    category: "Politics",
-  },
-  {
-    id: 5,
-    name: "Tech Regulation",
-    biasScore: 0.42,
-    misinfoRisk: 0.28,
-    trendDirection: "down",
-    trendPercentage: 12,
-    sources: 38,
-    category: "Technology",
-  },
-  {
-    id: 6,
-    name: "Education Funding",
-    biasScore: 0.51,
-    misinfoRisk: 0.22,
-    trendDirection: "stable",
-    trendPercentage: 5,
-    sources: 29,
-    category: "Education",
-  },
-]
+// Define an interface for the article structure based on the API
+interface Article {
+  _id: string // Assuming MongoDB ObjectId as string
+  title: string
+  category?: string // Optional, as we might need to derive it
+  bias_score?: number
+  misinformation_risk?: number
+  source_name?: string // Assuming this field exists for source count
+  published_at: string // Assuming ISO date string
+  content_preview?: string // For deriving category if needed
+  // Add other relevant fields from the article structure
+}
+
 
 export function TrendingTopics() {
+  const [topics, setTopics] = useState<Topic[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
+
+  useEffect(() => {
+    const fetchTopics = async () => {
+      try {
+        setIsLoading(true)
+        const response = await fetch("/api/mongodb")
+        if (!response.ok) {
+          throw new Error(`Failed to fetch topics: ${response.statusText}`)
+        }
+        const data = await response.json()
+        const articles: Article[] = data.articles || []
+
+        // Group articles by category
+        const groupedByCategory: Record<string, Article[]> = articles.reduce((acc, article) => {
+          const category = article.category || "General"
+          if (!acc[category]) {
+            acc[category] = []
+          }
+          acc[category].push(article)
+          return acc
+        }, {} as Record<string, Article[]>)
+
+        // Transform grouped articles into Topic structure
+        const transformedTopics: Topic[] = Object.entries(groupedByCategory).map(([categoryName, categoryArticles], index) => {
+          const totalBiasScore = categoryArticles.reduce((sum, article) => sum + (article.bias_score || 0), 0)
+          const totalMisinfoRisk = categoryArticles.reduce((sum, article) => sum + (article.misinformation_risk || 0), 0)
+          const uniqueSources = new Set(categoryArticles.map(article => article.source_name).filter(Boolean))
+
+          return {
+            id: categoryName, // Use category name as ID
+            name: categoryName,
+            biasScore: categoryArticles.length > 0 ? totalBiasScore / categoryArticles.length : 0,
+            misinfoRisk: categoryArticles.length > 0 ? totalMisinfoRisk / categoryArticles.length : 0,
+            trendDirection: "stable", // Placeholder
+            trendPercentage: 0, // Placeholder
+            sources: uniqueSources.size,
+            category: categoryName,
+          }
+        })
+
+        setTopics(transformedTopics)
+      } catch (err) {
+        setError(err.message)
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    fetchTopics()
+  }, [])
 
   const filteredTopics = selectedCategory ? topics.filter((topic) => topic.category === selectedCategory) : topics
 
@@ -113,31 +123,37 @@ export function TrendingTopics() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap gap-2">
-        <Button
-          variant={selectedCategory === null ? "default" : "outline"}
-          size="sm"
-          onClick={() => setSelectedCategory(null)}
-        >
-          All Topics
-        </Button>
-        {categories.map((category) => (
-          <Button
-            key={category}
-            variant={selectedCategory === category ? "default" : "outline"}
-            size="sm"
-            onClick={() => setSelectedCategory(category)}
-          >
-            {category}
-          </Button>
-        ))}
-      </div>
+      {isLoading && <p>Loading trending topics...</p>}
+      {error && <p className="text-red-500">Error: {error}</p>}
+      {!isLoading && !error && (
+        <>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant={selectedCategory === null ? "default" : "outline"}
+              size="sm"
+              onClick={() => setSelectedCategory(null)}
+            >
+              All Topics
+            </Button>
+            {categories.map((category) => (
+              <Button
+                key={category}
+                variant={selectedCategory === category ? "default" : "outline"}
+                size="sm"
+                onClick={() => setSelectedCategory(category)}
+              >
+                {category}
+              </Button>
+            ))}
+          </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filteredTopics.map((topic) => (
-          <Card key={topic.id} className="overflow-hidden">
-            <CardContent className="p-0">
-              <div className="p-6">
+          {filteredTopics.length === 0 && <p>No trending topics found.</p>}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {filteredTopics.map((topic) => (
+              <Card key={topic.id} className="overflow-hidden">
+                <CardContent className="p-0">
+                  <div className="p-6">
                 <div className="flex items-start justify-between mb-4">
                   <div>
                     <h3 className="font-bold text-lg mb-1">{topic.name}</h3>

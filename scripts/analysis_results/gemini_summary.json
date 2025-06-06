@@ -1,0 +1,28 @@
+{
+  "analysis_timestamp": "2025-06-04T13:34:11.177143+00:00",
+  "statistics": {
+    "articles_analyzed": 50,
+    "high_bias_detected": 1,
+    "misinformation_flagged": 2,
+    "embeddings_generated": 50,
+    "processing_errors": 0
+  },
+  "model_used": "gemini-2.0-flash-001",
+  "embedding_model": "all-MiniLM-L6-v2",
+  "embedding_dimensions": 384,
+  "analysis_version": "3.0",
+  "vector_search_enabled": true,
+  "embedding_stats": {
+    "total_embeddings_generated": 50,
+    "embedding_types": [
+      "content_embedding",
+      "title_embedding",
+      "analysis_embedding"
+    ],
+    "embedding_model_info": {
+      "name": "all-MiniLM-L6-v2",
+      "dimensions": 384,
+      "similarity_metric": "cosine"
+    }
+  }
+}
