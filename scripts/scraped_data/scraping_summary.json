@@ -1,0 +1,98 @@
+{
+  "scraping_timestamp": "2025-06-04T04:11:13.407021",
+  "statistics": {
+    "categories_processed": 5,
+    "topics_processed": 6,
+    "articles_found": 172,
+    "articles_stored": 172,
+    "duplicates_skipped": 0,
+    "errors": 4
+  },
+  "sample_articles": [
+    {
+      "title": "CNBC Daily Open: Elon Musk's companies report positive developments amid his return to work - CNBC",
+      "source": "CNBC",
+      "url": "https://www.cnbc.com/2025/06/03/cnbc-daily-open-good-news-for-musks-companies-amid-his-return-to-work.html",
+      "word_count": 329,
+      "published_at": "2025-06-03T00:50:00Z"
+    },
+    {
+      "title": "Stock futures slip after S&P 500 kicks off June with a modest gain: Live updates - CNBC",
+      "source": "CNBC",
+      "url": "https://www.cnbc.com/2025/06/02/stock-market-today-live-updates.html",
+      "word_count": 407,
+      "published_at": "2025-06-02T23:57:00Z"
+    },
+    {
+      "title": "Dave\u2019s Hot Chicken sold to Subway owner Roark Capital in a $1 billion deal - AP News",
+      "source": "Associated Press",
+      "url": "https://apnews.com/article/daves-hot-chicken-roark-caca42cedf915683a4707a77248b9c45",
+      "word_count": 209,
+      "published_at": "2025-06-02T23:28:00Z"
+    },
+    {
+      "title": "To prevent blackouts, Trump administration keeps another aging power plant online through summer - AP News",
+      "source": "Associated Press",
+      "url": "https://apnews.com/article/trump-pennsylvania-eddystone-power-plant-e5eb5295a6b8de72636a9478e06fec4b",
+      "word_count": 574,
+      "published_at": "2025-06-02T22:57:00Z"
+    },
+    {
+      "title": "Uber Promotes Company Veteran to COO as CEO Says He\u2019s Not Going \u2018Anywhere\u2019 - Bloomberg",
+      "source": "Bloomberg",
+      "url": "https://www.bloomberg.com/news/articles/2025-06-02/uber-promotes-company-veteran-to-coo-ceo-says-he-s-not-going-anywhere",
+      "word_count": 110,
+      "published_at": "2025-06-02T22:36:51Z"
+    },
+    {
+      "title": "What is Palantir? The secretive tech company behind Trump's data collection efforts - Mashable",
+      "source": "Mashable",
+      "url": "https://mashable.com/article/what-is-palantir-trump-data-collection-database",
+      "word_count": 787,
+      "published_at": "2025-06-02T21:41:53Z"
+    },
+    {
+      "title": "Paramount Schedules Annual Shareholder Meeting, Sets Board Expansion Amid Skydance Merger Watch - Deadline",
+      "source": "Deadline",
+      "url": "http://deadline.com/2025/06/paramount-sets-annual-shareholder-meeting-skydance-merger-1236420893/",
+      "word_count": 658,
+      "published_at": "2025-06-02T21:33:00Z"
+    },
+    {
+      "title": "Crypto Bros Celebrate Themselves at Bitcoin\u2019s Most MAGA Convention Yet - Rolling Stone",
+      "source": "Rolling Stone",
+      "url": "http://www.rollingstone.com/culture/culture-features/bitcoin-2025-maga-lovefest-trump-1235352924/",
+      "word_count": 3186,
+      "published_at": "2025-06-02T21:29:36Z"
+    },
+    {
+      "title": "A runway under construction at Newark's beleaguered airport reopens early - NPR",
+      "source": "NPR",
+      "url": "https://www.npr.org/2025/06/02/nx-s1-5421234/newark-airport-closed-runway-opens-early",
+      "word_count": 548,
+      "published_at": "2025-06-02T21:05:35Z"
+    },
+    {
+      "title": "United and JetBlue: How the Blue Sky partnership will help travelers, and where there's room to grow - The Points Guy",
+      "source": "The Points Guy",
+      "url": "https://thepointsguy.com/news/united-airlines-jetblue-blue-sky-partnership/",
+      "word_count": 1464,
+      "published_at": "2025-06-02T20:33:42Z"
+    }
+  ],
+  "categories_processed": [
+    "business",
+    "technology",
+    "science",
+    "health",
+    "general"
+  ],
+  "topics_processed": [
+    "misinformation",
+    "fact checking",
+    "media bias",
+    "artificial intelligence",
+    "politics",
+    "climate"
+  ]
+}

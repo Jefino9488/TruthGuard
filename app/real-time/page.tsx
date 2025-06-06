@@ -2,8 +2,26 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge"
 import { Activity, Database, Cpu, Globe } from "lucide-react"
 import { EnhancedRealTimeFeed } from "@/components/enhanced-real-time-feed"
+import { useEffect, useState } from "react"
 
 export default function RealTimePage() {
+  const [articles, setArticles] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    async function fetchArticles() {
+      setLoading(true)
+      const res = await fetch("/api/mongodb")
+      const data = await res.json()
+      setArticles(data.articles || [])
+      setLoading(false)
+    }
+    fetchArticles()
+    // Optionally, poll every 30s for real-time updates
+    const interval = setInterval(fetchArticles, 30000)
+    return () => clearInterval(interval)
+  }, [])
+
   return (
     <div className="min-h-screen bg-slate-50">
       {/* Header */}
@@ -77,7 +95,7 @@ export default function RealTimePage() {
         </div>
 
         {/* Real-Time Feed */}
-        <EnhancedRealTimeFeed />
+        <EnhancedRealTimeFeed articles={articles} loading={loading} />
 
         {/* Technical Architecture */}
         <Card className="mt-8">
