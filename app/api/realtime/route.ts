@@ -51,11 +51,11 @@ export async function GET(request: NextRequest) {
             },
             timestamp: new Date().toISOString(),
             stats: {
-              total_processed: systemStats.total_articles || Math.floor(Math.random() * 1000) + 2000,
-              bias_detected: systemStats.bias_flagged || Math.floor(Math.random() * 100) + 200,
-              misinformation_flagged: systemStats.misinfo_flagged || Math.floor(Math.random() * 20) + 10,
-              high_credibility: systemStats.high_credibility || Math.floor(Math.random() * 500) + 1000,
-              processing_rate: Math.floor(Math.random() * 50) + 800, // articles per hour
+              total_processed: systemStats?.total_articles || 0,
+              bias_detected: systemStats?.bias_flagged || 0,
+              misinformation_flagged: systemStats?.misinfo_flagged || 0,
+              high_credibility: systemStats?.high_credibility || 0,
+              // processing_rate is removed as it was purely random and not used in the current frontend.
             },
           }
 
