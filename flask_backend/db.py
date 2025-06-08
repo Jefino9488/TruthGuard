@@ -36,6 +36,19 @@ def init_db(app):
     mongo.init_app(app)
     app.logger.info("Flask-PyMongo extension initialized.")
 
+    # --- Verify MongoDB Connection and Database Object ---
+    if mongo.cx is None:
+        app.logger.critical("MongoDB client (mongo.cx) is None after init_app. Check MONGODB_URI and server status.")
+        raise RuntimeError("Failed to connect to MongoDB: Client connection is None. Verify MONGODB_URI and ensure the MongoDB server is accessible.")
+
+    if mongo.db is None:
+        app.logger.critical("MongoDB database object (mongo.db) is None after init_app. This usually means the database specified in MONGODB_URI is inaccessible or does not exist, or there's an issue with authentication/authorization.")
+        raise RuntimeError("Failed to connect to MongoDB: Database object is None. Verify MONGODB_URI (including database name, user, password) and ensure the MongoDB server is accessible and configured correctly.")
+
+    app.logger.info(f"MongoDB connection client: {mongo.cx}")
+    app.logger.info(f"MongoDB database object: {mongo.db.name}")
+
+
     # --- Create Indexes after PyMongo is initialized ---
     # This ensures that critical indexes for querying are present.
     # `create_index` is idempotent; it only creates an index if it doesn't already exist or if the definition has changed.
@@ -44,8 +57,12 @@ def init_db(app):
     app.logger.info("Attempting to ensure MongoDB indexes for 'articles' collection...")
     try:
         # It's good practice to have the app context available for `mongo.db`
+        # Although with recent Flask versions and Flask-PyMongo, mongo.db might be accessible
+        # directly after init_app if the app context from init_db's call is still effectively active.
+        # Using app_context() explicitly here is safer.
         with app.app_context():
-            articles_collection = mongo.db.articles # Access the collection via the initialized mongo instance
+            # We've already checked mongo.db is not None, so this access should be safe.
+            articles_collection = mongo.db.articles
 
             # Indexes for common sorting and filtering fields in the API
             articles_collection.create_index([("published_at", pymongo.DESCENDING)], background=True, name="idx_published_at_desc")
