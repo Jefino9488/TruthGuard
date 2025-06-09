@@ -33,81 +33,85 @@ from dotenv import load_dotenv # Keep for now, might be redundant if Flask handl
 from pydantic import BaseModel, Field, ValidationError
 
 # Configure logging - paths will be relative to flask_backend
-LOG_DIR = 'analysis_reports'
-RESULTS_DIR = 'analysis_results'
+# LOG_DIR = 'analysis_reports' # Removed
+# RESULTS_DIR = 'analysis_results' # Removed
 
-os.makedirs(LOG_DIR, exist_ok=True)
-os.makedirs(RESULTS_DIR, exist_ok=True)
+# os.makedirs(LOG_DIR, exist_ok=True) # Removed
+# os.makedirs(RESULTS_DIR, exist_ok=True) # Removed
 
 # Configure logging for this module.
 # This logger will write to its own file 'gemini_analysis.log' and will not
 # propagate messages to the main app logger by default if app.py's logger is also named `__name__`.
 # Using a specific name for this logger ensures its independence if needed.
-analyzer_logger = logging.getLogger(__name__) # Logger named after the module: 'flask_backend.analyzer'
-analyzer_logger.setLevel(logging.INFO) # Default level
+# analyzer_logger = logging.getLogger(__name__) # Logger named after the module: 'flask_backend.analyzer' # Removed
+# analyzer_logger.setLevel(logging.INFO) # Default level # Removed
 
 # File Handler for analyzer-specific logs
-analyzer_file_handler = logging.FileHandler(os.path.join(LOG_DIR, 'gemini_analysis.log'), mode='a')
-analyzer_file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-analyzer_logger.addHandler(analyzer_file_handler)
+# analyzer_file_handler = logging.FileHandler(os.path.join(LOG_DIR, 'gemini_analysis.log'), mode='a') # Removed
+# analyzer_file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')) # Removed
+# analyzer_logger.addHandler(analyzer_file_handler) # Removed
 
 # Optional: Console Handler for analyzer logs (can be verbose)
-# analyzer_stream_handler = logging.StreamHandler()
-# analyzer_stream_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-# analyzer_logger.addHandler(analyzer_stream_handler)
+# analyzer_stream_handler = logging.StreamHandler() # Removed
+# analyzer_stream_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')) # Removed
+# analyzer_logger.addHandler(analyzer_stream_handler) # Removed
 
-analyzer_logger.propagate = False # Avoid duplicate logs if root logger is also configured
+# analyzer_logger.propagate = False # Avoid duplicate logs if root logger is also configured # Removed
 
+from scripts.analyze_with_gemini import GeminiAnalyzer
+# Import Pydantic models from the script, assuming they are defined there.
+# If not, the previous step of commenting them out here would need to be reverted for the ones not in the script.
+from scripts.analyze_with_gemini import FactCheck, BiasAnalysis, MisinformationAnalysis, SentimentAnalysis, CredibilityAssessment, AnalysisResponse
+from flask import current_app
+# os, logging, pymongo, etc., are already imported or not directly needed in run_analysis_task after refactor.
 
+# Pydantic models are now imported from scripts.analyze_with_gemini
 # --- Pydantic Models for Structured AI Analysis Response ---
-# These models define the expected JSON structure for the analysis results from Gemini.
-# They include default values and type validation.
-class FactCheck(BaseModel):
-    """Represents a single fact-check claim and its verdict."""
-    claim: str = "N/A"
-    verdict: str = "N/A"
-    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
-    explanation: str = "N/A"
+# class FactCheck(BaseModel):
+#     """Represents a single fact-check claim and its verdict."""
+#     claim: str = "N/A"
+#     verdict: str = "N/A"
+#     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+#     explanation: str = "N/A"
+#
+# class BiasAnalysis(BaseModel):
+#     """Represents the bias analysis of an article."""
+#     overall_score: float = Field(default=0.0, ge=0.0, le=1.0, description="Overall bias score, 0 (low) to 1 (high)")
+#     political_leaning: str = Field(default="center", description="Detected political leaning (e.g., left, right, center, moderate)")
+#     bias_indicators: list[str] = Field(default=[], description="List of specific phrases or indicators of bias found")
+#     language_bias: float = Field(default=0.0, ge=0.0, le=1.0, description="Score for language-specific bias")
+#     source_bias: float = Field(default=0.0, ge=0.0, le=1.0, description="Estimated bias of the source")
+#     framing_bias: float = Field(default=0.0, ge=0.0, le=1.0, description="Score for framing or presentation bias")
+#
+# class MisinformationAnalysis(BaseModel):
+#     """Represents the misinformation analysis of an article."""
+#     risk_score: float = Field(default=0.0, ge=0.0, le=1.0, description="Overall misinformation risk, 0 (low) to 1 (high)")
+#     fact_checks: list[FactCheck] = Field(default=[], description="List of fact-checks related to claims in the article")
+#     red_flags: list[str] = Field(default=[], description="List of detected misinformation red flags or questionable claims")
+#
+# class SentimentAnalysis(BaseModel):
+#     """Represents the sentiment analysis of an article."""
+#     overall_sentiment: float = Field(default=0.0, ge=-1.0, le=1.0, description="Overall sentiment score, -1 (negative) to 1 (positive)")
+#     emotional_tone: str = Field(default="neutral", description="Predominant emotional tone (e.g., neutral, angry, joyful)")
+#     key_phrases: list[str] = Field(default=[], description="Key phrases contributing to the sentiment")
+#
+# class CredibilityAssessment(BaseModel):
+#     """Represents the credibility assessment of an article."""
+#     overall_score: float = Field(default=0.0, ge=0.0, le=1.0, description="Overall credibility score, 0 (low) to 1 (high)")
+#     evidence_quality: float = Field(default=0.0, ge=0.0, le=1.0, description="Assessed quality of evidence presented")
+#     source_reliability: float = Field(default=0.0, ge=0.0, le=1.0, description="Assessed reliability of the source")
+#
+# class AnalysisResponse(BaseModel):
+#     """The overall structured response from the AI analysis."""
+#     bias_analysis: BiasAnalysis = Field(default_factory=BiasAnalysis)
+#     misinformation_analysis: MisinformationAnalysis = Field(default_factory=MisinformationAnalysis)
+#     sentiment_analysis: SentimentAnalysis = Field(default_factory=SentimentAnalysis)
+#     credibility_assessment: CredibilityAssessment = Field(default_factory=CredibilityAssessment)
+#     confidence: float = Field(default=0.5, ge=0.0, le=1.0, description="Overall confidence in the analysis, 0 (low) to 1 (high)")
 
-class BiasAnalysis(BaseModel):
-    """Represents the bias analysis of an article."""
-    overall_score: float = Field(default=0.0, ge=0.0, le=1.0, description="Overall bias score, 0 (low) to 1 (high)")
-    political_leaning: str = Field(default="center", description="Detected political leaning (e.g., left, right, center, moderate)")
-    bias_indicators: list[str] = Field(default=[], description="List of specific phrases or indicators of bias found")
-    language_bias: float = Field(default=0.0, ge=0.0, le=1.0, description="Score for language-specific bias")
-    source_bias: float = Field(default=0.0, ge=0.0, le=1.0, description="Estimated bias of the source")
-    framing_bias: float = Field(default=0.0, ge=0.0, le=1.0, description="Score for framing or presentation bias")
-
-class MisinformationAnalysis(BaseModel):
-    """Represents the misinformation analysis of an article."""
-    risk_score: float = Field(default=0.0, ge=0.0, le=1.0, description="Overall misinformation risk, 0 (low) to 1 (high)")
-    fact_checks: list[FactCheck] = Field(default=[], description="List of fact-checks related to claims in the article")
-    red_flags: list[str] = Field(default=[], description="List of detected misinformation red flags or questionable claims")
-
-class SentimentAnalysis(BaseModel):
-    """Represents the sentiment analysis of an article."""
-    overall_sentiment: float = Field(default=0.0, ge=-1.0, le=1.0, description="Overall sentiment score, -1 (negative) to 1 (positive)")
-    emotional_tone: str = Field(default="neutral", description="Predominant emotional tone (e.g., neutral, angry, joyful)")
-    key_phrases: list[str] = Field(default=[], description="Key phrases contributing to the sentiment")
-
-class CredibilityAssessment(BaseModel):
-    """Represents the credibility assessment of an article."""
-    overall_score: float = Field(default=0.0, ge=0.0, le=1.0, description="Overall credibility score, 0 (low) to 1 (high)")
-    evidence_quality: float = Field(default=0.0, ge=0.0, le=1.0, description="Assessed quality of evidence presented")
-    source_reliability: float = Field(default=0.0, ge=0.0, le=1.0, description="Assessed reliability of the source")
-
-class AnalysisResponse(BaseModel):
-    """The overall structured response from the AI analysis."""
-    bias_analysis: BiasAnalysis = Field(default_factory=BiasAnalysis)
-    misinformation_analysis: MisinformationAnalysis = Field(default_factory=MisinformationAnalysis)
-    sentiment_analysis: SentimentAnalysis = Field(default_factory=SentimentAnalysis)
-    credibility_assessment: CredibilityAssessment = Field(default_factory=CredibilityAssessment)
-    confidence: float = Field(default=0.5, ge=0.0, le=1.0, description="Overall confidence in the analysis, 0 (low) to 1 (high)")
-
-
-class GeminiAnalyzer:
-    """
-    Handles AI-powered analysis of news articles using Google's Gemini model.
+# class GeminiAnalyzer:
+#     """
+#     Handles AI-powered analysis of news articles using Google's Gemini model.
 
     This class is responsible for:
     - Connecting to Google Gemini API.
@@ -526,8 +530,8 @@ Output JSON only, with no other text before or after the JSON object.
             with open(summary_path, 'w', encoding='utf-8') as f:
                 json.dump(summary_doc, f, indent=4, default=str)
             analyzer_logger.info(f"Analysis summary saved to {summary_path}")
-        except Exception as e:
-            analyzer_logger.error(f"Error saving analysis summary to {summary_path}: {e}", exc_info=True)
+#         except Exception as e:
+#             analyzer_logger.error(f"Error saving analysis summary to {summary_path}: {e}", exc_info=True)
 
 def run_analysis_task(batch_size: int = 10) -> dict:
     """
@@ -540,33 +544,40 @@ def run_analysis_task(batch_size: int = 10) -> dict:
     Returns:
         dict: Statistics from the analysis run.
     """
-    analyzer_logger.info(f"--- Initiating new AI analysis task run (batch_size: {batch_size}) ---")
-    google_api_key = os.getenv('GOOGLE_API_KEY')
-    mongodb_uri = os.getenv('MONGODB_URI')
+    logger = current_app.logger # Use Flask app's logger
+    logger.info(f"--- Initiating analysis task via GeminiAnalyzer from scripts (batch_size: {batch_size}) ---")
 
-    if not google_api_key:
-        analyzer_logger.error("CRITICAL: GOOGLE_API_KEY not set. Analysis task cannot proceed.")
-        return {"status": "error", "message": "GOOGLE_API_KEY not configured for analyzer."}
-    if not mongodb_uri:
-        analyzer_logger.error("CRITICAL: MONGODB_URI not set. Analysis task cannot proceed.")
-        return {"status": "error", "message": "MONGODB_URI not configured for analyzer."}
-
-    start_run_time = time.time()
     try:
-        analyzer = GeminiAnalyzer(google_api_key=google_api_key, mongodb_uri=mongodb_uri)
-        stats = analyzer.run_batch_analysis(batch_size=batch_size)
-        analyzer_logger.info("AI analysis task completed successfully via run_analysis_task wrapper.")
-        end_run_time = time.time()
-        analyzer_logger.info(f"--- AI analysis task run completed in {end_run_time - start_run_time:.2f} seconds ---")
-        return stats
-    except ValueError as ve: # Configuration errors from GeminiAnalyzer init
-        analyzer_logger.error(f"Configuration error during analysis task setup: {ve}", exc_info=True)
-        return {"status": "error", "message": str(ve), "details": "ValueError during GeminiAnalyzer initialization."}
-    except Exception as e: # Any other unexpected error
-        analyzer_logger.error(f"An unexpected error occurred during the main analysis task: {e}", exc_info=True)
-        end_run_time = time.time()
-        analyzer_logger.info(f"--- AI analysis task run failed after {end_run_time - start_run_time:.2f} seconds ---")
-        return {"status": "error", "message": "An unexpected error occurred during analysis.", "details": str(e)}
+        google_api_key = current_app.config.get('GOOGLE_API_KEY')
+        mongo_db_uri = current_app.config.get('MONGODB_URI')
+
+        if not google_api_key:
+            logger.error("GOOGLE_API_KEY not configured in Flask app for GeminiAnalyzer.")
+            return {"status": "error", "message": "GOOGLE_API_KEY not configured."}
+        if not mongo_db_uri: # Should be caught by app init typically
+            logger.error("MONGODB_URI not configured in Flask app for GeminiAnalyzer.")
+            return {"status": "error", "message": "MONGODB_URI not configured."}
+
+        # Use the imported GeminiAnalyzer from scripts directory
+        analyzer = GeminiAnalyzer(
+            google_api_key=google_api_key,
+            mongo_uri=mongo_db_uri,
+            app_logger=logger # Pass the Flask app's logger
+        )
+
+        # The run_batch_analysis method in the refactored script now returns stats
+        analysis_stats = analyzer.run_batch_analysis(batch_size=batch_size)
+
+        logger.info(f"GeminiAnalyzer task finished. Stats: {analysis_stats}")
+        return {
+            "status": "success",
+            "message": "Analysis task completed using GeminiAnalyzer from scripts.",
+            "details": analysis_stats # Contains the stats dictionary from the analyzer
+        }
+
+    except Exception as e:
+        logger.error(f"An error occurred during the GeminiAnalyzer (from scripts) analysis task: {e}", exc_info=True)
+        return {"status": "error", "message": str(e)}
 
 # Example of how to run it directly (for testing purposes, not for Flask app use)
 # if __name__ == "__main__":
