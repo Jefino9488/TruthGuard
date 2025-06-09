@@ -41,32 +41,52 @@ CATEGORIES = ["business", "technology", "science", "health", "general"]
 TOPICS = ["misinformation", "fact checking", "media bias", "artificial intelligence", "politics", "climate"]
 
 class NewsAPIFetcher:
-    def __init__(self):
-        # Get API key from environment variables
-        self.api_key = '3947efaec8434d89ac545eb02f4b245d'
+    def __init__(self, news_api_key: str, mongo_uri: str, app_logger=None):
+        if app_logger:
+            self.logger = app_logger
+        else:
+            # Configure a default logger for standalone use
+            self.logger = logging.getLogger(__name__ + ".NewsAPIFetcher")
+            if not self.logger.handlers: # Avoid adding multiple handlers if already configured
+                # Basic configuration if run standalone
+                log_file_handler = logging.FileHandler('scraping_logs/scraper_fetcher.log', mode='a')
+                log_stream_handler = logging.StreamHandler()
+                log_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+                log_file_handler.setFormatter(log_formatter)
+                log_stream_handler.setFormatter(log_formatter)
+                self.logger.addHandler(log_file_handler)
+                self.logger.addHandler(log_stream_handler)
+                self.logger.setLevel(logging.INFO)
+
+        self.api_key = news_api_key
         if not self.api_key:
-            raise ValueError("NEWS_API_KEY environment variable not set")
+            self.logger.error("News API key not provided.") # Changed from raise to log
+            raise ValueError("News API key is required")
+
+        self.mongo_uri = mongo_uri
+        if not self.mongo_uri:
+            self.logger.error("MongoDB URI not provided.") # Changed from raise to log
+            raise ValueError("MongoDB URI is required")
 
         # Initialize NewsApiClient
-        logger.info("Initializing News API client...")
+        self.logger.info("Initializing News API client...")
         self.newsapi = NewsApiClient(api_key=self.api_key)
 
         # MongoDB connection
-        self.mongo_uri = 'mongodb+srv://jefino9488:Jefino1537@truthguardcluster.2wku5ai.mongodb.net/?retryWrites=true&w=majority&appName=TruthGuardCluster'
-        if not self.mongo_uri:
-            raise ValueError("MONGODB_URI environment variable not set")
-
+        self.logger.info(f"Connecting to MongoDB at {self.mongo_uri.split('@')[-1].split('/')[0]}...") # Mask credentials
         self.mongo_client = pymongo.MongoClient(self.mongo_uri)
-        self.db = self.mongo_client.truthguard
+        self.db = self.mongo_client.truthguard # Consider making db name configurable too
         self.collection = self.db.articles
 
         # Initialize sentence transformer model for embeddings
-        logger.info("Loading sentence transformer model...")
+        self.logger.info("Loading sentence transformer model...")
         self.model = SentenceTransformer('all-MiniLM-L6-v2')  # 384 dimensions
 
         # Ensure indexes for full-text search
-        logger.info("Creating MongoDB indexes...")
-        self.collection.create_index([("title", "text"), ("content", "text")])
+        self.logger.info("Creating MongoDB indexes for 'articles' collection...")
+        self.collection.create_index([("title", "text"), ("content", "text")], name="idx_title_content_text")
+        self.collection.create_index([("article_id", pymongo.ASCENDING)], unique=True, name="idx_article_id_unique")
+
 
         # Statistics
         self.stats = {
@@ -91,14 +111,14 @@ class NewsAPIFetcher:
             response = self.newsapi.get_top_headlines(**params)
 
             if response["status"] != "ok":
-                logger.error(f"API Error: {response.get('message', 'Unknown error')}")
+                self.logger.error(f"API Error: {response.get('message', 'Unknown error')}")
                 return []
 
-            logger.info(f"Fetched {len(response['articles'])} top headlines for category: {category or 'all'}")
+            self.logger.info(f"Fetched {len(response['articles'])} top headlines for category: {category or 'all'}")
             return response["articles"]
 
         except Exception as e:
-            logger.error(f"Error fetching top headlines: {e}")
+            self.logger.error(f"Error fetching top headlines: {e}")
             self.stats['errors'] += 1
             return []
 
@@ -113,14 +133,14 @@ class NewsAPIFetcher:
             )
 
             if response["status"] != "ok":
-                logger.error(f"API Error: {response.get('message', 'Unknown error')}")
+                self.logger.error(f"API Error: {response.get('message', 'Unknown error')}")
                 return []
 
-            logger.info(f"Fetched {len(response['articles'])} articles for query: {query}")
+            self.logger.info(f"Fetched {len(response['articles'])} articles for query: {query}")
             return response["articles"]
 
         except Exception as e:
-            logger.error(f"Error fetching articles: {e}")
+            self.logger.error(f"Error fetching articles: {e}")
             self.stats['errors'] += 1
             return []
 
@@ -135,7 +155,7 @@ class NewsAPIFetcher:
             return article.text if article.text else ""
 
         except Exception as e:
-            logger.error(f"Error extracting content from {url}: {e}")
+            self.logger.error(f"Error extracting content from {url}: {e}")
             return ""
 
     def generate_embedding(self, text):
@@ -151,7 +171,7 @@ class NewsAPIFetcher:
             return embedding.tolist()  # Convert numpy array to list for MongoDB storage
 
         except Exception as e:
-            logger.error(f"Error generating embedding: {e}")
+            self.logger.error(f"Error generating embedding: {e}")
             return None
 
     def process_article(self, article):
@@ -166,7 +186,7 @@ class NewsAPIFetcher:
 
             # Skip articles without title or URL
             if not title or not url:
-                logger.warning(f"Skipping article with missing title or URL")
+                self.logger.warning(f"Skipping article with missing title or URL")
                 return None
 
             # Generate a unique ID for the article based on URL
@@ -175,7 +195,7 @@ class NewsAPIFetcher:
             # Check if article already exists in database
             existing = self.collection.find_one({"article_id": article_id})
             if existing:
-                logger.info(f"Article already exists: {title[:50]}...")
+                self.logger.info(f"Article already exists: {title[:50]}...")
                 self.stats['duplicates_skipped'] += 1
                 return None
 
@@ -188,7 +208,7 @@ class NewsAPIFetcher:
 
             # Skip articles with insufficient content
             if len(content) < 200:
-                logger.warning(f"Skipping article with insufficient content: {title[:50]}...")
+                self.logger.warning(f"Skipping article with insufficient content: {title[:50]}...")
                 return None
 
             # Generate vector embedding for content
@@ -217,7 +237,7 @@ class NewsAPIFetcher:
             return article_doc
 
         except Exception as e:
-            logger.error(f"Error processing article: {e}")
+            self.logger.error(f"Error processing article: {e}")
             self.stats['errors'] += 1
             return None
 
@@ -233,26 +253,26 @@ class NewsAPIFetcher:
                 if article:
                     self.collection.insert_one(article)
                     inserted_count += 1
-                    logger.info(f"Stored: {article['title'][:50]}...")
+                    self.logger.info(f"Stored: {article['title'][:50]}...")
 
             self.stats['articles_stored'] += inserted_count
-            logger.info(f"Stored {inserted_count} articles in MongoDB")
+            self.logger.info(f"Stored {inserted_count} articles in MongoDB")
             return inserted_count
 
         except Exception as e:
-            logger.error(f"Error storing articles: {e}")
+            self.logger.error(f"Error storing articles: {e}")
             self.stats['errors'] += 1
             return 0
 
     def run(self):
         """Run the complete fetching process"""
-        logger.info("Starting TruthGuard News API fetching...")
+        self.logger.info("Starting TruthGuard News API fetching...")
 
         all_articles = []
 
         # Fetch top headlines for each category
         for category in CATEGORIES:
-            logger.info(f"Fetching top headlines for category: {category}")
+            self.logger.info(f"Fetching top headlines for category: {category}")
             articles = self.fetch_top_headlines(category=category)
 
             # Process each article
@@ -263,14 +283,14 @@ class NewsAPIFetcher:
                     processed_articles.append(processed)
                     self.stats['articles_found'] += 1
 
-            logger.info(f"Fetched {len(processed_articles)} articles for category {category}")
+            self.logger.info(f"Fetched {len(processed_articles)} articles for category {category}")
             all_articles.extend(processed_articles)
             self.stats['categories_processed'] += 1
             time.sleep(1)  # Rate limiting
 
         # Fetch articles for specific topics
         for topic in TOPICS:
-            logger.info(f"Fetching articles for topic: {topic}")
+            self.logger.info(f"Fetching articles for topic: {topic}")
             articles = self.fetch_everything(query=topic)
 
             # Process each article
@@ -281,7 +301,7 @@ class NewsAPIFetcher:
                     processed_articles.append(processed)
                     self.stats['articles_found'] += 1
 
-            logger.info(f"Fetched {len(processed_articles)} articles for topic {topic}")
+            self.logger.info(f"Fetched {len(processed_articles)} articles for topic {topic}")
             all_articles.extend(processed_articles)
             self.stats['topics_processed'] += 1
             time.sleep(1)  # Rate limiting
@@ -292,9 +312,9 @@ class NewsAPIFetcher:
         # Save to file for GitLab artifacts
         self.save_scraping_summary(all_articles)
 
-        logger.info(f"Fetching complete. Total articles: {len(all_articles)}, Stored: {stored_count}")
+        self.logger.info(f"Fetching complete. Total articles found (before filtering for storage): {self.stats['articles_found']}, Stored: {self.stats['articles_stored']}")
 
-        return 0  # Return 0 for successful execution
+        return self.stats # Return the statistics dictionary
 
     def save_scraping_summary(self, articles):
         """Save scraping summary and sample data"""
@@ -335,9 +355,26 @@ class NewsAPIFetcher:
         with open('scraped_data/articles_sample.json', 'w') as f:
             json.dump(limited_articles, f, indent=2, default=str)
 
-        logger.info("Scraping summary saved to artifacts")
+        self.logger.info("Scraping summary saved to artifacts")
 
 if __name__ == "__main__":
-    import json
-    fetcher = NewsAPIFetcher()
+    import json # Keep this import local if only used here
+    load_dotenv('.env.local') # Load .env for standalone run
+
+    news_key = os.getenv('NEWS_API_KEY_SCRAPER') # Use a distinct name or ensure .env has NEWS_API_KEY
+    mongo_connection_string = os.getenv('MONGODB_URI')
+
+    if not news_key:
+        print("Error: NEWS_API_KEY_SCRAPER environment variable not set for standalone run.")
+        sys.exit(1)
+    if not mongo_connection_string:
+        print("Error: MONGODB_URI environment variable not set for standalone run.")
+        sys.exit(1)
+
+    # Standalone logger configuration (basic, could be more elaborate)
+    # The global logger configuration at the top of the file will apply if not overridden by specific class loggers.
+    # Ensure the global logger is configured before instantiating.
+    standalone_logger = logging.getLogger(__name__) # This will use the global config at the top
+
+    fetcher = NewsAPIFetcher(news_api_key=news_key, mongo_uri=mongo_connection_string, app_logger=standalone_logger)
     sys.exit(fetcher.run())

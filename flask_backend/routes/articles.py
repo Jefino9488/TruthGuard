@@ -111,6 +111,21 @@ def list_articles():
         #     except ValueError:
         #         return error_response("Invalid value for min_credibility.", 400)
 
+        # Filtering by analysis scores
+        score_filters = {
+            'min_bias_score': ('bias_score', '$gte'), 'max_bias_score': ('bias_score', '$lte'),
+            'min_misinformation_risk': ('misinformation_risk', '$gte'), 'max_misinformation_risk': ('misinformation_risk', '$lte'),
+            'min_credibility_score': ('credibility_score', '$gte'), 'max_credibility_score': ('credibility_score', '$lte'),
+            'min_sentiment': ('sentiment', '$gte'), 'max_sentiment': ('sentiment', '$lte')
+        }
+
+        for param, (field, operator) in score_filters.items():
+            if param in request.args:
+                try:
+                    score_value = float(request.args[param])
+                    query_filters.setdefault(field, {}).update({operator: score_value})
+                except ValueError:
+                    return error_response(f"Invalid value for {param}. Must be a number.", 400)
 
         # Sorting
         sort_field = request.args.get('sort_by', 'published_at') # Default sort by published_at
@@ -118,7 +133,11 @@ def list_articles():
         sort_order = -1 if sort_order_str == 'desc' else 1
 
         # Validate sort_field against a list of allowed fields to prevent arbitrary field sorting
-        allowed_sort_fields = ['published_at', 'scraped_at', 'analyzed_at', 'credibility_score', 'bias_score', 'misinformation_risk', 'sentiment', 'source', 'title']
+        allowed_sort_fields = [
+            'published_at', 'scraped_at', 'analyzed_at',
+            'credibility_score', 'bias_score', 'misinformation_risk', 'sentiment',
+            'source', 'title', 'word_count'
+        ]
         if sort_field not in allowed_sort_fields:
             sort_field = 'published_at' # Default back if not allowed
 
@@ -149,7 +168,98 @@ def list_articles():
         return error_response("An unexpected error occurred while fetching articles.", 500)
 
 
-@articles_bp.route('/articles/<string:article_id_str>', methods=['GET'])
+@articles_bp.route('/<string:article_id_str>/similar', methods=['GET'])
+def find_similar_articles(article_id_str):
+    logger = current_app.logger
+    logger.info(f"Finding similar articles for ID: {article_id_str} with args: {request.args}")
+
+    try:
+        # 1. Get query parameters
+        embedding_type_param = request.args.get('embedding_type', 'content') # 'content', 'title', 'analysis'
+        limit = int(request.args.get('limit', 10))
+        num_candidates = int(request.args.get('num_candidates', 100))
+
+        # Map param to actual field name and index name
+        embedding_field_map = {
+            'content': 'content_embedding',
+            'title': 'title_embedding',
+            'analysis': 'analysis_embedding'
+        }
+        # Hypothetical index names - these MUST match what's created in Atlas
+        vector_index_name_map = {
+            'content': 'vector_index_content_embedding',
+            'title': 'vector_index_title_embedding',
+            'analysis': 'vector_index_analysis_embedding'
+        }
+
+        if embedding_type_param not in embedding_field_map:
+            return error_response(f"Invalid embedding_type '{embedding_type_param}'. Allowed: 'content', 'title', 'analysis'.", 400)
+
+        embedding_field = embedding_field_map[embedding_type_param]
+        vector_index_name = vector_index_name_map[embedding_type_param]
+
+        # 2. Fetch the source article and its embedding
+        source_query = {}
+        if ObjectId.is_valid(article_id_str):
+            source_query['_id'] = ObjectId(article_id_str)
+        else:
+            source_query['article_id'] = article_id_str
+
+        source_article = mongo.db.articles.find_one(source_query)
+        if not source_article:
+            return error_response("Source article not found.", 404)
+
+        source_embedding = source_article.get(embedding_field)
+        if not source_embedding or not isinstance(source_embedding, list) or len(source_embedding) == 0:
+            return error_response(f"Source article is missing a valid, non-empty '{embedding_field}'.", 404)
+
+        # 3. Construct and execute the $vectorSearch aggregation pipeline
+        pipeline = [
+            {
+                '$vectorSearch': {
+                    'index': vector_index_name,
+                    'queryVector': source_embedding,
+                    'path': embedding_field,
+                    'numCandidates': num_candidates,
+                    'limit': limit + 1 # Fetch one extra to exclude the source article itself if it appears
+                }
+            },
+            {
+                # Exclude the source article itself from the results, comparing by _id
+                '$match': {
+                    '_id': {'$ne': source_article['_id']}
+                }
+            },
+            {
+                '$limit': limit # Apply the final limit after excluding the source article
+            },
+            {
+                '$project': {
+                    '_id': 1, 'title': 1, 'url': 1, 'source': 1, 'published_at': 1,
+                    'article_id': 1,
+                    'processing_status': 1, 'bias_score': 1, 'misinformation_risk': 1, 'credibility_score': 1, 'sentiment': 1,
+                    'similarity_score': { '$meta': 'vectorSearchScore' }
+                }
+            }
+        ]
+
+        similar_articles_cursor = mongo.db.articles.aggregate(pipeline)
+
+        result_list = list(similar_articles_cursor)
+        logger.info(f"Found {len(result_list)} similar articles for {article_id_str} using {embedding_field}.")
+
+        return make_json_response({'similar_articles': result_list})
+
+    except ValueError: # For int conversion errors for limit/num_candidates
+        return error_response("Invalid 'limit' or 'num_candidates'. Must be integers.", 400)
+    except Exception as e:
+        logger.error(f"Error finding similar articles for {article_id_str}: {e}", exc_info=True)
+        if "Unrecognized pipeline stage name: '$vectorSearch'" in str(e) or "vectorSearch" in str(e).lower() or "Unknown operator: $vectorSearch" in str(e):
+             return error_response("Vector search is not supported or the index is not configured correctly on the database. Please ensure you are using MongoDB Atlas and the vector search index is properly set up.", 501)
+        return error_response("An unexpected error occurred while finding similar articles.", 500)
+
+
+@articles_bp.route('/<string:article_id_str>', methods=['GET']) # Corrected route
 def get_article(article_id_str):
     """
     Retrieve a single article by its MongoDB _id or custom article_id.
@@ -175,7 +285,7 @@ def get_article(article_id_str):
         return error_response(f"An error occurred while fetching the article: {str(e)}", 500)
 
 
-@articles_bp.route('/articles', methods=['POST'])
+@articles_bp.route('', methods=['POST']) # Corrected route for POST to /api/articles
 def create_article():
     """
     Create a new article.
@@ -232,7 +342,7 @@ def create_article():
         return error_response(f"An error occurred while creating the article: {str(e)}", 500)
 
 
-@articles_bp.route('/articles/<string:article_id_str>', methods=['PUT'])
+@articles_bp.route('/<string:article_id_str>', methods=['PUT']) # Corrected route
 def update_article(article_id_str):
     """
     Update an existing article by its MongoDB _id or custom article_id.
@@ -290,7 +400,7 @@ def update_article(article_id_str):
         return error_response(f"An error occurred while updating the article: {str(e)}", 500)
 
 
-@articles_bp.route('/articles/<string:article_id_str>', methods=['DELETE'])
+@articles_bp.route('/<string:article_id_str>', methods=['DELETE']) # Corrected route
 def delete_article(article_id_str):
     """
     Delete an article by its MongoDB _id or custom article_id.
