@@ -19,7 +19,8 @@ class ArticleService:
         sort_direction = ASCENDING if sort_order.lower() == "asc" else DESCENDING
 
         try:
-            articles_cursor = self.articles_collection.find({}) \
+            query_filter = {"processing_status": "analyzed"}
+            articles_cursor = self.articles_collection.find(query_filter) \
                 .sort(sort_by, sort_direction) \
                 .skip(skip) \
                 .limit(limit)
@@ -28,7 +29,7 @@ class ArticleService:
                 article['_id'] = str(article['_id']) # Convert ObjectId to string for JSON serialization
                 articles.append(article)
 
-            total_articles = self.articles_collection.count_documents({})
+            total_articles = self.articles_collection.count_documents(query_filter)
 
             logger.info(f"Retrieved {len(articles)} articles (page {page}, limit {limit})")
             return {

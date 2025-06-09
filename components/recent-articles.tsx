@@ -9,11 +9,11 @@ import { ExternalLink, AlertTriangle, CheckCircle } from "lucide-react"
 interface ApiArticle {
   _id: string
   title: string
-  source_name?: string // Or whatever the field is named in your API
+  source?: string // Changed from source_name
   published_at: string // Assuming ISO date string
   bias_score?: number
   misinformation_risk?: number
-  article_url?: string // For the external link
+  url?: string // Changed from article_url
 }
 
 // Interface for the article structure used in the component's rendering
@@ -51,21 +51,22 @@ export function RecentArticles() {
     const fetchArticles = async () => {
       setIsLoading(true)
       try {
-        const response = await fetch("/api/mongodb")
+        const response = await fetch("http://localhost:5000/articles?sort_by=published_at&sort_order=desc&limit=20")
         if (!response.ok) {
           throw new Error(`Failed to fetch articles: ${response.statusText}`)
         }
         const data = await response.json()
+        // Assuming Flask returns { articles: [...] }
         const apiArticles: ApiArticle[] = data.articles || []
 
         const transformedArticles: RecentArticleDisplay[] = apiArticles.map(article => ({
           id: article._id,
           title: article.title || "No title available",
-          source: article.source_name || "Unknown source",
+          source: article.source || "Unknown source", // Changed from article.source_name
           time: formatTimeAgo(article.published_at),
           biasScore: article.bias_score || 0,
           misinfoRisk: article.misinformation_risk || 0,
-          articleUrl: article.article_url,
+          articleUrl: article.url, // Changed from article.article_url
         }));
         setArticles(transformedArticles)
       } catch (err) {

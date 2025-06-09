@@ -29,7 +29,7 @@ def trigger_scrape():
     API endpoint to trigger the news scraping task.
     """
     try:
-        news_api_key = current_app.config['NEWS_API_KEY']
+        news_api_key = current_app.config['NEWS_API_KEY_SCRAPER']
         scraper = NewsAPIFetcherTask(db, news_api_key)
 
         thread = threading.Thread(target=scraper.run_scraper)
@@ -167,6 +167,76 @@ def get_articles():
     if "error" in result:
         return jsonify(result), 500
     return jsonify(result), 200
+
+
+@main_bp.route('/api/v1/system/status', methods=['GET'])
+def system_status():
+    """
+    API endpoint to retrieve system status.
+    """
+    status = {}
+    try:
+        # Check MongoDB status
+        try:
+            db.command('ping')
+            status['mongodb'] = "connected"
+        except Exception as e:
+            current_app.logger.error(f"MongoDB connection error: {e}", exc_info=True)
+            status['mongodb'] = "disconnected"
+
+        # Check Google API status
+        if current_app.config.get('GOOGLE_API_KEY'):
+            status['google_api'] = "configured"
+        else:
+            status['google_api'] = "not_configured"
+
+        # Check News API status
+        if current_app.config.get('NEWS_API_KEY_SCRAPER'): # Matches usage in /scrape endpoint
+            status['news_api'] = "configured"
+        else:
+            status['news_api'] = "not_configured"
+
+        return jsonify(status), 200
+
+    except Exception as e:
+        current_app.logger.error(f"Error fetching system status: {e}", exc_info=True)
+        return jsonify({"error": "Failed to retrieve system status", "details": str(e)}), 500
+
+
+@main_bp.route('/api/v1/dashboard/statistics', methods=['GET'])
+def dashboard_statistics():
+    """
+    API endpoint to retrieve dashboard statistics.
+    """
+    try:
+        articles_collection = db.articles
+
+        total_articles_processed = articles_collection.count_documents({
+            "processing_status": "analyzed"
+        })
+
+        total_bias_detected = articles_collection.count_documents({
+            "processing_status": "analyzed",
+            "bias_score": {"$gte": 0.6}
+        })
+
+        total_misinformation_risk = articles_collection.count_documents({
+            "processing_status": "analyzed",
+            "misinformation_risk": {"$gte": 0.5}
+        })
+
+        overall_accuracy_rate = "N/A - Definition pending"  # Placeholder
+
+        return jsonify({
+            "total_articles_processed": total_articles_processed,
+            "total_bias_detected": total_bias_detected,
+            "total_misinformation_risk": total_misinformation_risk,
+            "overall_accuracy_rate": overall_accuracy_rate
+        }), 200
+
+    except Exception as e:
+        current_app.logger.error(f"Error fetching dashboard statistics: {e}", exc_info=True)
+        return jsonify({"error": "Failed to retrieve dashboard statistics", "details": str(e)}), 500
 
 
 @main_bp.route('/articles/<article_id>', methods=['GET'])
