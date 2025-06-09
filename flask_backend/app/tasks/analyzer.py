@@ -1,8 +1,4 @@
-#!/usr/bin/env python3
-"""
-Google Gemini AI Analysis for TruthGuard
-Advanced bias detection and content analysis with vector embeddings
-"""
+# flask_backend/app/tasks/analyzer.py
 
 import os
 import json
@@ -18,27 +14,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 from sentence_transformers import SentenceTransformer
 import numpy as np
-from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
-# Load environment variables
-load_dotenv('.env.local')
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('analysis_reports/gemini_analysis.log'),
-        logging.StreamHandler()
-    ]
-)
 logger = logging.getLogger(__name__)
 
-# Log Python version for debugging
-logger.info(f"Python version: {sys.version}")
-
-# Pydantic models for structured JSON response
+# Pydantic models for structured JSON response (re-declared here for self-containment)
 class FactCheck(BaseModel):
     claim: str
     verdict: str
@@ -75,31 +55,20 @@ class AnalysisResponse(BaseModel):
     credibility_assessment: CredibilityAssessment
     confidence: float = Field(ge=0.0, le=1.0)
 
-class GeminiAnalyzer:
-    def __init__(self):
-        # Configure Gemini client
-        api_key = os.getenv('GOOGLE_API_KEY')
-        if not api_key:
-            raise ValueError("GOOGLE_API_KEY environment variable not set")
-        self.client = genai.Client(api_key=api_key)
-
-        # Initialize sentence transformer model for embeddings
-        logger.info("Loading sentence transformer model...")
-        self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')  # 384 dimensions
-
-        # MongoDB connection
-        mongo_uri = os.getenv('MONGODB_URI')
-        if not mongo_uri:
-            raise ValueError("MONGODB_URI environment variable not set")
-        self.mongo_client = pymongo.MongoClient(mongo_uri)
-        self.db = self.mongo_client.truthguard
+class GeminiAnalyzerTask:
+    def __init__(self, db_client, google_api_key, model_path='all-MiniLM-L6-v2'):
+        self.db = db_client
         self.collection = self.db.articles
 
-        # Create directories
-        os.makedirs('analysis_results', exist_ok=True)
-        os.makedirs('analysis_reports', exist_ok=True)
+        # Configure Gemini client
+        if not google_api_key:
+            raise ValueError("GOOGLE_API_KEY is not provided to GeminiAnalyzerTask")
+        genai.configure(api_key=google_api_key) # Use genai.configure for global API key setting
+        self.client_model = genai.GenerativeModel('gemini-2.0-flash-001') # Use the model directly
 
-        # Statistics
+        logger.info(f"Loading sentence transformer model: {model_path}...")
+        self.embedding_model = SentenceTransformer(model_path) # 384 dimensions
+
         self.stats = {
             'articles_analyzed': 0,
             'high_bias_detected': 0,
@@ -126,50 +95,44 @@ class GeminiAnalyzer:
             try:
                 prompt = f"""
                 You are TruthGuard AI, an expert media bias and misinformation detection system.
-
-                Analyze this news article comprehensively:
+                Analyze this news article comprehensively and return a JSON object strictly conforming to the AnalysisResponse Pydantic model.
+                Ensure all fields are present and valid, especially for float ranges (0.0 to 1.0 or -1.0 to 1.0) and list types.
 
                 Title: {article['title']}
                 Source: {article['source']}
                 Content: {article['content'][:8000]}
                 """
-                content = types.Content(
-                    role='user',
-                    parts=[types.Part.from_text(text=prompt)]
-                )
 
-                # Estimate token usage
-                token_count = self.client.models.count_tokens(
-                    model='gemini-2.0-flash-001',
-                    contents=content
-                ).total_tokens
-                logger.debug(f"Estimated tokens for article {article['_id']}: {token_count}")
-
-                response = self.client.models.generate_content(
-                    model='gemini-2.0-flash-001',
-                    contents=content,
-                    config=types.GenerateContentConfig(
+                # Gemini 2.0 models automatically handle JSON schema if response_mime_type is application/json and response_schema is provided.
+                response = self.client_model.generate_content(
+                    prompt,
+                    generation_config=types.GenerationConfig(
                         response_mime_type='application/json',
-                        response_schema=AnalysisResponse,
+                        response_schema=AnalysisResponse.model_json_schema(), # Pass Pydantic schema
                         temperature=0.3,
-                        max_output_tokens=2000,
-                        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
+                        max_output_tokens=2000
                     )
                 )
 
                 try:
-                    analysis = json.loads(response.text)
+                    # Gemini's response.text is already the JSON string if response_mime_type is application/json
+                    analysis_data = json.loads(response.text)
+                    # Validate with Pydantic model
+                    analysis = AnalysisResponse(**analysis_data)
+                    analysis_dict = analysis.model_dump() # Convert back to dict for MongoDB
+
                     update_fields = {
-                        'ai_analysis': analysis,
-                        'bias_score': analysis['bias_analysis']['overall_score'],
-                        'misinformation_risk': analysis['misinformation_analysis']['risk_score'],
-                        'sentiment': analysis['sentiment_analysis']['overall_sentiment'],
-                        'credibility_score': analysis['credibility_assessment']['overall_score'],
+                        'ai_analysis': analysis_dict,
+                        'bias_score': analysis_dict['bias_analysis']['overall_score'],
+                        'misinformation_risk': analysis_dict['misinformation_analysis']['risk_score'],
+                        'sentiment': analysis_dict['sentiment_analysis']['overall_sentiment'],
+                        'credibility_score': analysis_dict['credibility_assessment']['overall_score'],
                         'processing_status': 'analyzed',
                         'analyzed_at': datetime.now(timezone.utc),
                         'analysis_model': 'gemini-2.0-flash-001'
                     }
 
+                    # Generate and update embeddings if not already present or needs regeneration
                     if 'content_embedding' not in article or article['content_embedding'] is None:
                         content_embedding = self.generate_embedding(article['content'])
                         if content_embedding:
@@ -182,7 +145,7 @@ class GeminiAnalyzer:
                             update_fields['title_embedding'] = title_embedding
                             self.stats['embeddings_generated'] += 1
 
-                    analysis_text = f"{analysis['bias_analysis']['political_leaning']} {' '.join(analysis['bias_analysis']['bias_indicators'])} {' '.join(analysis['misinformation_analysis']['red_flags'])} {analysis['sentiment_analysis']['emotional_tone']}"
+                    analysis_text = f"{analysis_dict['bias_analysis']['political_leaning']} {' '.join(analysis_dict['bias_analysis']['bias_indicators'])} {' '.join(analysis_dict['misinformation_analysis']['red_flags'])} {analysis_dict['sentiment_analysis']['emotional_tone']}"
                     analysis_embedding = self.generate_embedding(analysis_text)
                     if analysis_embedding:
                         update_fields['analysis_embedding'] = analysis_embedding
@@ -194,54 +157,66 @@ class GeminiAnalyzer:
                     )
 
                     self.stats['articles_analyzed'] += 1
-                    if analysis['bias_analysis']['overall_score'] > 0.7:
+                    if analysis_dict['bias_analysis']['overall_score'] > 0.7:
                         self.stats['high_bias_detected'] += 1
-                    if analysis['misinformation_analysis']['risk_score'] > 0.6:
+                    if analysis_dict['misinformation_analysis']['risk_score'] > 0.6:
                         self.stats['misinformation_flagged'] += 1
 
-                    logger.info(f"Analyzed: {article['title'][:50]}...")
-                    return analysis
+                    logger.info(f"Analyzed: {article['title'][:50]}... ID: {article['_id']}")
+                    return analysis_dict
 
-                except json.JSONDecodeError:
-                    logger.error(f"Failed to parse Gemini response for article {article['_id']}")
+                except (json.JSONDecodeError, ValueError, AttributeError) as e:
+                    logger.error(f"Failed to parse or validate Gemini response for article {article['_id']}: {e}. Raw response: {response.text}")
+                    self.stats['processing_errors'] += 1
+                    # Attempt a fallback analysis if parsing/validation fails
                     return self.generate_fallback_analysis(article)
 
             except errors.APIError as e:
-                if e.code in [429, 503]:
+                if e.status_code in [429, 503]: # Use status_code for APIError
                     wait_time = 5 * (2 ** attempt) + random.uniform(0, 1)
-                    logger.warning(f"Retrying article {article['_id']} after {wait_time:.2f}s due to {e.code} error")
+                    logger.warning(f"Retrying article {article['_id']} after {wait_time:.2f}s due to {e.status_code} error: {e.message}")
                     time.sleep(wait_time)
                     if attempt == max_retries - 1:
-                        logger.error(f"Max retries reached for article {article['_id']}: {e.code} - {e.message}")
+                        logger.error(f"Max retries reached for article {article['_id']}: {e.status_code} - {e.message}")
                         self.stats['processing_errors'] += 1
                         return self.generate_fallback_analysis(article)
                 else:
-                    logger.error(f"Gemini API error for article {article['_id']}: {e.code} - {e.message}")
+                    logger.error(f"Gemini API error for article {article['_id']}: {e.status_code} - {e.message}")
                     self.stats['processing_errors'] += 1
                     return self.generate_fallback_analysis(article)
             except Exception as e:
-                logger.error(f"Error analyzing article {article['_id']}: {e}")
+                logger.error(f"Unexpected error analyzing article {article['_id']}: {e}", exc_info=True)
                 self.stats['processing_errors'] += 1
                 return self.generate_fallback_analysis(article)
         return None
 
     def generate_fallback_analysis(self, article):
-        """Generate fallback analysis when Gemini fails"""
+        """Generate fallback analysis when Gemini fails or Pydantic validation fails"""
+        logger.info(f"Generating fallback analysis for article {article['_id']}")
         content = article['content'].lower()
         bias_keywords = {
-            'left': ['progressive', 'liberal', 'social justice', 'inequality'],
-            'right': ['conservative', 'traditional', 'free market', 'law and order']
+            'left': ['progressive', 'liberal', 'social justice', 'inequality', 'democrat'],
+            'right': ['conservative', 'traditional', 'free market', 'law and order', 'republican']
         }
 
         left_score = sum(1 for word in bias_keywords['left'] if word in content)
         right_score = sum(1 for word in bias_keywords['right'] if word in content)
-        bias_score = min((left_score + right_score) / 10, 1.0)
+
+        # Simple heuristic for bias score
+        bias_score = 0.0
+        political_leaning = 'center'
+        if left_score > right_score:
+            bias_score = min(left_score / 5, 1.0) # Max 1.0 for simplified scoring
+            political_leaning = 'left-leaning'
+        elif right_score > left_score:
+            bias_score = min(right_score / 5, 1.0)
+            political_leaning = 'right-leaning'
 
         analysis = {
             'bias_analysis': {
                 'overall_score': bias_score,
-                'political_leaning': 'center',
-                'bias_indicators': [],
+                'political_leaning': political_leaning,
+                'bias_indicators': ["keyword_detection"] if bias_score > 0 else [],
                 'language_bias': bias_score,
                 'source_bias': 0.3,
                 'framing_bias': bias_score * 0.8
@@ -249,7 +224,7 @@ class GeminiAnalyzer:
             'misinformation_analysis': {
                 'risk_score': 0.3,
                 'fact_checks': [],
-                'red_flags': []
+                'red_flags': ["fallback_analysis_used"]
             },
             'sentiment_analysis': {
                 'overall_sentiment': 0.0,
@@ -257,11 +232,11 @@ class GeminiAnalyzer:
                 'key_phrases': []
             },
             'credibility_assessment': {
-                'overall_score': 0.7,
-                'evidence_quality': 0.6,
-                'source_reliability': 0.7
+                'overall_score': 0.5, # Lower confidence for fallback
+                'evidence_quality': 0.4,
+                'source_reliability': 0.5
             },
-            'confidence': 0.5
+            'confidence': 0.2 # Low confidence for fallback
         }
 
         update_fields = {
@@ -275,6 +250,7 @@ class GeminiAnalyzer:
             'analysis_model': 'fallback'
         }
 
+        # Still attempt to generate embeddings even for fallback
         if 'content_embedding' not in article or article['content_embedding'] is None:
             content_embedding = self.generate_embedding(article['content'])
             if content_embedding:
@@ -283,34 +259,46 @@ class GeminiAnalyzer:
 
         if 'title_embedding' not in article or article['title_embedding'] is None:
             title_embedding = self.generate_embedding(article['title'])
-            if content_embedding:
+            if title_embedding:
                 update_fields['title_embedding'] = title_embedding
                 self.stats['embeddings_generated'] += 1
 
-        analysis_text = f"center neutral fallback analysis"
+        analysis_text = f"{analysis['bias_analysis']['political_leaning']} {' '.join(analysis['bias_analysis']['bias_indicators'])} {' '.join(analysis['misinformation_analysis']['red_flags'])} {analysis['sentiment_analysis']['emotional_tone']}"
         analysis_embedding = self.generate_embedding(analysis_text)
         if analysis_embedding:
             update_fields['analysis_embedding'] = analysis_embedding
             self.stats['embeddings_generated'] += 1
 
-        self.collection.update_one(
-            {'_id': article['_id']},
-            {'$set': update_fields}
-        )
+        try:
+            self.collection.update_one(
+                {'_id': article['_id']},
+                {'$set': update_fields}
+            )
+            logger.info(f"Updated article {article['_id']} with fallback analysis.")
+        except Exception as e:
+            logger.error(f"Error updating article {article['_id']} with fallback analysis: {e}")
 
         return analysis
 
-    def run_batch_analysis(self, batch_size=50):
+    def run_analyzer(self, batch_size=50):
         """Run analysis on unprocessed articles"""
-        logger.info("Starting Gemini AI batch analysis...")
+        logger.info(f"Starting Gemini AI batch analysis task with batch size {batch_size}...")
 
         unprocessed = list(self.collection.find({
-            'processing_status': {'$in': ['pending', None]}
+            'processing_status': {'$in': ['pending', 'analyzed_fallback', None]} # Re-analyze fallbacks potentially
         }).limit(batch_size))
+
+        if not unprocessed:
+            logger.info("No unprocessed articles found to analyze.")
+            return self.stats
 
         logger.info(f"Found {len(unprocessed)} articles to analyze")
 
-        with ThreadPoolExecutor(max_workers=1) as executor:
+        # Use ThreadPoolExecutor for concurrent API calls
+        # Be mindful of Gemini API rate limits. max_workers should be set cautiously.
+        # A low number like 1-2 might be safer for free tiers or lower usage.
+        # The 'time.sleep(5)' in the loop also helps.
+        with ThreadPoolExecutor(max_workers=2) as executor: # Adjusted for safer API rate limiting
             future_to_article = {
                 executor.submit(self.analyze_article_comprehensive, article): article
                 for article in unprocessed
@@ -320,41 +308,10 @@ class GeminiAnalyzer:
                 article = future_to_article[future]
                 try:
                     analysis = future.result()
-                    time.sleep(5)  # Increased delay for rate limiting
+                    # Add a delay between processing each article's result to mitigate rate limiting
+                    time.sleep(5)
                 except Exception as e:
                     logger.error(f"Analysis failed for {article['_id']}: {e}")
 
-        self.save_analysis_summary()
         logger.info(f"Analysis complete. Stats: {self.stats}")
-
-    def save_analysis_summary(self):
-        """Save analysis summary for GitLab artifacts"""
-        summary = {
-            'analysis_timestamp': datetime.now(timezone.utc).isoformat(),
-            'statistics': self.stats,
-            'model_used': 'gemini-2.0-flash-001',
-            'embedding_model': 'all-MiniLM-L6-v2',
-            'embedding_dimensions': 384,
-            'analysis_version': '3.0',
-            'vector_search_enabled': True
-        }
-
-        embedding_stats = {
-            'total_embeddings_generated': self.stats['embeddings_generated'],
-            'embedding_types': ['content_embedding', 'title_embedding', 'analysis_embedding'],
-            'embedding_model_info': {
-                'name': 'all-MiniLM-L6-v2',
-                'dimensions': 384,
-                'similarity_metric': 'cosine'
-            }
-        }
-        summary['embedding_stats'] = embedding_stats
-
-        with open('analysis_results/gemini_summary.json', 'w') as f:
-            json.dump(summary, f, indent=2, default=str)
-
-        logger.info("Analysis summary saved with embedding statistics")
-
-if __name__ == "__main__":
-    analyzer = GeminiAnalyzer()
-    analyzer.run_batch_analysis()
+        return self.stats

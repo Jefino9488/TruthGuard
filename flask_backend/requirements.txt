@@ -1,14 +1,9 @@
 Flask
-Flask-PyMongo
-Flask-CORS
-APScheduler
-newsapi-python
-sentence-transformers
-beautifulsoup4
-requests
-newspaper3k
+pymongo
 python-dotenv
+newsapi-python
+newspaper3k
+sentence-transformers
 google-generativeai
 pydantic
-pytest
-pytest-mock
+gunicorn # For production deployment
